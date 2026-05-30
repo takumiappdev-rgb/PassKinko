@@ -1,0 +1,16 @@
+パス金庫 V001.000.000 ビルド手順
+
+1. このZIPを展開します。
+2. 展開した直下フォルダで PowerShell を開きます。
+3. 以下を実行します。
+
+   .\build_release.bat
+
+4. 成功すると以下にリリース用ファイルが出力されます。
+
+   RELEASE\PassKinko_V001.000.000\
+
+注意:
+- build_release.bat はこのファイルと同じ階層にあります。
+- .NET 8 SDK が必要です。
+- 実行先PCには .NET 8 Desktop Runtime が必要です。

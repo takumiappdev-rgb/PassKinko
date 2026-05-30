@@ -1,0 +1,33 @@
+# Visual Studio / .NET build outputs
+bin/
+obj/
+.vs/
+BUILD_WORK/
+RELEASE/
+
+# User-specific Visual Studio files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local app data / database
+*.db
+*.db-wal
+*.db-shm
+passkinko.db
+settings.json
+
+# Backup / export / logs
+*.pkbk
+*.csv
+*.log
+LOG/
+SAVE/
+
+# Archives
+*.zip
+
+# OS files
+Thumbs.db
+.DS_Store

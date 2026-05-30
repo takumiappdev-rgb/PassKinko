@@ -1,0 +1,11 @@
+<Application x:Class="PassKinko.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <SolidColorBrush x:Key="AccentBrush" Color="#0B63D8" />
+        <SolidColorBrush x:Key="TextBrush" Color="#1F2937" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#6B7280" />
+        <SolidColorBrush x:Key="BorderBrushSoft" Color="#D1D5DB" />
+    </Application.Resources>
+</Application>
