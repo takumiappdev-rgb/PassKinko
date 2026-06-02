@@ -45,14 +45,20 @@ public sealed class CredentialRepository
     {
         var vault = LoadVault();
         return vault.Items
-            .Select(x => new CredentialSummary
+            .Select(x =>
             {
-                Id = x.Id,
-                ServiceName = _crypto.DecryptString(x.ServiceNameEnc, _keysProvider()),
-                Website = _crypto.DecryptString(x.WebsiteEnc, _keysProvider()),
-                Username = _crypto.DecryptString(x.UsernameEnc, _keysProvider()),
-                Memo = _crypto.DecryptString(x.MemoEnc, _keysProvider()),
-                UpdatedAt = x.UpdatedAt
+                var website = _crypto.DecryptString(x.WebsiteEnc, _keysProvider());
+                var websites = DecryptWebsites(x, website);
+                return new CredentialSummary
+                {
+                    Id = x.Id,
+                    ServiceName = _crypto.DecryptString(x.ServiceNameEnc, _keysProvider()),
+                    Website = websites.FirstOrDefault() ?? website,
+                    Websites = websites,
+                    Username = _crypto.DecryptString(x.UsernameEnc, _keysProvider()),
+                    Memo = _crypto.DecryptString(x.MemoEnc, _keysProvider()),
+                    UpdatedAt = x.UpdatedAt
+                };
             })
             .OrderByDescending(x => x.UpdatedAt)
             .ThenBy(x => x.ServiceName)
@@ -111,7 +117,9 @@ public sealed class CredentialRepository
         }
 
         existing.ServiceNameEnc = _crypto.EncryptString(item.ServiceName.Trim(), _keysProvider());
-        existing.WebsiteEnc = _crypto.EncryptString(item.Website.Trim(), _keysProvider());
+        var websites = NormalizeWebsites(item);
+        existing.WebsiteEnc = _crypto.EncryptString(websites.FirstOrDefault() ?? string.Empty, _keysProvider());
+        existing.WebsitesJsonEnc = _crypto.EncryptString(JsonSerializer.Serialize(websites, CompactJsonOptions), _keysProvider());
         existing.UsernameEnc = _crypto.EncryptString(item.Username.Trim(), _keysProvider());
         existing.PasswordEnc = _crypto.EncryptString(item.Password, _keysProvider());
         existing.MemoEnc = _crypto.EncryptString(item.Memo.Trim(), _keysProvider());
@@ -142,7 +150,7 @@ public sealed class CredentialRepository
             sb.AppendLine(string.Join(",", new[]
             {
                 Csv(item.ServiceName),
-                Csv(item.Website),
+                Csv(string.Join("; ", NormalizeWebsites(item))),
                 Csv(item.Username),
                 Csv(item.Password),
                 Csv(item.Memo),
@@ -233,6 +241,7 @@ public sealed class CredentialRepository
                 Id = vault.NextId++,
                 ServiceName = item.ServiceName,
                 Website = item.Website,
+                Websites = NormalizeWebsites(item),
                 Username = item.Username,
                 Password = item.Password,
                 Memo = item.Memo,
@@ -244,17 +253,23 @@ public sealed class CredentialRepository
         return vault;
     }
 
-    private CredentialItem FromVaultCredential(VaultCredential x) => new()
+    private CredentialItem FromVaultCredential(VaultCredential x)
     {
-        Id = x.Id,
-        ServiceName = _crypto.DecryptString(x.ServiceNameEnc, _keysProvider()),
-        Website = _crypto.DecryptString(x.WebsiteEnc, _keysProvider()),
-        Username = _crypto.DecryptString(x.UsernameEnc, _keysProvider()),
-        Password = _crypto.DecryptString(x.PasswordEnc, _keysProvider()),
-        Memo = _crypto.DecryptString(x.MemoEnc, _keysProvider()),
-        CreatedAt = x.CreatedAt,
-        UpdatedAt = x.UpdatedAt
-    };
+        var website = _crypto.DecryptString(x.WebsiteEnc, _keysProvider());
+        var websites = DecryptWebsites(x, website);
+        return new CredentialItem
+        {
+            Id = x.Id,
+            ServiceName = _crypto.DecryptString(x.ServiceNameEnc, _keysProvider()),
+            Website = websites.FirstOrDefault() ?? website,
+            Websites = websites,
+            Username = _crypto.DecryptString(x.UsernameEnc, _keysProvider()),
+            Password = _crypto.DecryptString(x.PasswordEnc, _keysProvider()),
+            Memo = _crypto.DecryptString(x.MemoEnc, _keysProvider()),
+            CreatedAt = x.CreatedAt,
+            UpdatedAt = x.UpdatedAt
+        };
+    }
 
     private VaultFile LoadVault() => LoadVaultFromPath(AppPaths.DatabasePath, _keysProvider());
 
@@ -271,7 +286,8 @@ public sealed class CredentialRepository
             ?? throw new InvalidDataException("資格情報データを読み込めません。破損または改ざんの可能性があります。");
 
         var actual = SignVault(vault, keys);
-        if (!VerifySignature(vault.SignatureBase64, actual))
+        var legacyActual = SignVault(vault, keys, includeWebsitesJson: false);
+        if (!VerifySignature(vault.SignatureBase64, actual) && !VerifySignature(vault.SignatureBase64, legacyActual))
         {
             throw new InvalidDataException("資格情報データの改ざん、破損、ロールバック、またはマスターパスワード不一致を検知しました。");
         }
@@ -298,7 +314,8 @@ public sealed class CredentialRepository
     {
         Id = item.Id,
         ServiceNameEnc = _crypto.EncryptString(item.ServiceName.Trim(), keys),
-        WebsiteEnc = _crypto.EncryptString(item.Website.Trim(), keys),
+        WebsiteEnc = _crypto.EncryptString(NormalizeWebsites(item).FirstOrDefault() ?? string.Empty, keys),
+        WebsitesJsonEnc = _crypto.EncryptString(JsonSerializer.Serialize(NormalizeWebsites(item), CompactJsonOptions), keys),
         UsernameEnc = _crypto.EncryptString(item.Username.Trim(), keys),
         PasswordEnc = _crypto.EncryptString(item.Password, keys),
         MemoEnc = _crypto.EncryptString(item.Memo.Trim(), keys),
@@ -308,26 +325,79 @@ public sealed class CredentialRepository
 
     private string SignVault(VaultFile vault) => SignVault(vault, _keysProvider());
 
-    private string SignVault(VaultFile vault, CryptoKeys keys)
+    private string SignVault(VaultFile vault, CryptoKeys keys, bool includeWebsitesJson = true)
     {
-        var payload = new
-        {
-            vault.NextId,
-            Items = vault.Items.Select(x => new
+        object payload = includeWebsitesJson
+            ? new
             {
-                x.Id,
-                x.ServiceNameEnc,
-                x.WebsiteEnc,
-                x.UsernameEnc,
-                x.PasswordEnc,
-                x.MemoEnc,
-                x.CreatedAt,
-                x.UpdatedAt
-            }).ToList()
-        };
+                vault.NextId,
+                Items = vault.Items.Select(x => new
+                {
+                    x.Id,
+                    x.ServiceNameEnc,
+                    x.WebsiteEnc,
+                    x.WebsitesJsonEnc,
+                    x.UsernameEnc,
+                    x.PasswordEnc,
+                    x.MemoEnc,
+                    x.CreatedAt,
+                    x.UpdatedAt
+                }).ToList()
+            }
+            : new
+            {
+                vault.NextId,
+                Items = vault.Items.Select(x => new
+                {
+                    x.Id,
+                    x.ServiceNameEnc,
+                    x.WebsiteEnc,
+                    x.UsernameEnc,
+                    x.PasswordEnc,
+                    x.MemoEnc,
+                    x.CreatedAt,
+                    x.UpdatedAt
+                }).ToList()
+            };
         var json = JsonSerializer.Serialize(payload, CompactJsonOptions);
         using var hmac = new HMACSHA256(keys.MacKey);
         return Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(json)));
+    }
+
+    private List<string> DecryptWebsites(VaultCredential credential, string fallbackWebsite)
+    {
+        if (!string.IsNullOrWhiteSpace(credential.WebsitesJsonEnc))
+        {
+            try
+            {
+                var json = _crypto.DecryptString(credential.WebsitesJsonEnc, _keysProvider());
+                var values = JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+                var normalized = NormalizeWebsites(values);
+                if (normalized.Count > 0) return normalized;
+            }
+            catch
+            {
+                // Fall back to the legacy single URL field so older data remains usable.
+            }
+        }
+
+        return NormalizeWebsites(new[] { fallbackWebsite });
+    }
+
+    private static List<string> NormalizeWebsites(CredentialItem item)
+    {
+        var values = item.Websites.Count > 0 ? item.Websites : new List<string> { item.Website };
+        return NormalizeWebsites(values);
+    }
+
+    private static List<string> NormalizeWebsites(IEnumerable<string> values)
+    {
+        return values
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
     }
 
     private static bool VerifySignature(string expectedBase64, string actualBase64)
@@ -409,6 +479,7 @@ public sealed class CredentialRepository
         public long Id { get; set; }
         public string ServiceNameEnc { get; set; } = string.Empty;
         public string WebsiteEnc { get; set; } = string.Empty;
+        public string WebsitesJsonEnc { get; set; } = string.Empty;
         public string UsernameEnc { get; set; } = string.Empty;
         public string PasswordEnc { get; set; } = string.Empty;
         public string MemoEnc { get; set; } = string.Empty;

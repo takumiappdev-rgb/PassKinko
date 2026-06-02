@@ -1,4 +1,4 @@
-パス金庫 V001.000.000 ビルド手順
+パス金庫 V002.000.000 ビルド手順
 
 1. このZIPを展開します。
 2. 展開した直下フォルダで PowerShell を開きます。
@@ -8,7 +8,13 @@
 
 4. 成功すると以下にリリース用ファイルが出力されます。
 
-   RELEASE\PassKinko_V001.000.000\
+   RELEASE\PassKinko_V002.000.000\
+
+5. GitHub Releases に添付する配布物は以下です。
+
+   PassKinko_V002.000.000_Windows.zip
+
+   Source code (zip) / Source code (tar.gz) は一般ユーザー向けではありません。
 
 注意:
 - build_release.bat はこのファイルと同じ階層にあります。

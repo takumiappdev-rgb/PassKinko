@@ -2,6 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Konscious.Security.Cryptography;
 using PassKinko.App.Models;
 
 namespace PassKinko.App.Security;
@@ -12,8 +13,11 @@ public sealed class MasterPasswordService
     public const int MaxLength = 64;
     private const int SaltSize = 32;
     private const int KeyMaterialSize = 64;
-    private const int Iterations = 600_000;
-    private static readonly byte[] VerifierPayload = Encoding.UTF8.GetBytes("PassKinko.MasterVerifier.v10");
+    private const int ArgonIterations = 4;
+    private const int ArgonMemorySize = 65536; // 64MB
+    private const int ArgonParallelism = 4;
+
+    private static readonly byte[] VerifierPayload = Encoding.UTF8.GetBytes("PassKinko.MasterVerifier.v20");
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
     public AppSettings CreateInitialSettings(string masterPassword)
@@ -105,7 +109,14 @@ public sealed class MasterPasswordService
             settings.AutoLockSeconds,
             settings.PasswordRevealSeconds,
             settings.ClipboardClearSeconds,
-            settings.WindowAnchor
+            settings.WindowAnchor,
+            settings.UseWindowsHello,
+            settings.WindowsHelloKeyProtectedBase64,
+            settings.GenUseUpper,
+            settings.GenUseDigits,
+            settings.GenUseSymbols,
+            settings.GenLength,
+            settings.MasterPasswordUpdateIntervalDays
         };
         return SignObject(payload, keys.MacKey);
     }
@@ -114,7 +125,8 @@ public sealed class MasterPasswordService
     {
         if (!settings.IsInitialized) return true;
         if (string.IsNullOrWhiteSpace(settings.SettingsSignatureBase64)) return false;
-        return FixedTimeEqualsBase64(settings.SettingsSignatureBase64, SignSettings(settings, keys));
+        return FixedTimeEqualsBase64(settings.SettingsSignatureBase64, SignSettings(settings, keys)) ||
+               FixedTimeEqualsBase64(settings.SettingsSignatureBase64, SignSettingsWithoutWindowsHelloKey(settings, keys));
     }
 
     public void UpdateMasterPassword(AppSettings settings, string newMasterPassword)
@@ -139,17 +151,19 @@ public sealed class MasterPasswordService
 
     private static CryptoKeys DeriveKeys(string password, byte[] salt)
     {
-        var material = Rfc2898DeriveBytes.Pbkdf2(
-            password,
-            salt,
-            Iterations,
-            HashAlgorithmName.SHA256,
-            KeyMaterialSize);
+        using var argon2 = new Argon2id(Encoding.UTF8.GetBytes(password));
+        argon2.Salt = salt;
+        argon2.DegreeOfParallelism = ArgonParallelism;
+        argon2.Iterations = ArgonIterations;
+        argon2.MemorySize = ArgonMemorySize;
+
+        var material = argon2.GetBytes(KeyMaterialSize);
 
         var encryptionKey = new byte[32];
         var macKey = new byte[32];
         Buffer.BlockCopy(material, 0, encryptionKey, 0, 32);
         Buffer.BlockCopy(material, 32, macKey, 0, 32);
+        
         CryptographicOperations.ZeroMemory(material);
         return new CryptoKeys(encryptionKey, macKey);
     }
@@ -170,6 +184,30 @@ public sealed class MasterPasswordService
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         using var hmac = new HMACSHA256(key);
         return Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(json)));
+    }
+
+    private static string SignSettingsWithoutWindowsHelloKey(AppSettings settings, CryptoKeys keys)
+    {
+        var payload = new
+        {
+            settings.IsInitialized,
+            settings.MasterVerifierBase64,
+            settings.KdfSaltChecksumBase64,
+            settings.MasterPasswordUpdatedAtUtc,
+            settings.InitializationRequired,
+            settings.SecurityMessage,
+            settings.AutoLockSeconds,
+            settings.PasswordRevealSeconds,
+            settings.ClipboardClearSeconds,
+            settings.WindowAnchor,
+            settings.UseWindowsHello,
+            settings.GenUseUpper,
+            settings.GenUseDigits,
+            settings.GenUseSymbols,
+            settings.GenLength,
+            settings.MasterPasswordUpdateIntervalDays
+        };
+        return SignObject(payload, keys.MacKey);
     }
 
     private static bool FixedTimeEqualsBase64(string leftBase64, string rightBase64)

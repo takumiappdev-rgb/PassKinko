@@ -39,4 +39,17 @@ public sealed class AppSettings
     // v10: マスターパスワード由来HMAC鍵で署名。KDF saltは公開KDFパラメータとして署名対象外。
     // 失敗回数/ロックアウト期限はOperationalStateProtectedBase64でDPAPI保護する。
     public string SettingsSignatureBase64 { get; set; } = string.Empty;
+
+    // v20: Windows Hello 利用フラグ
+    public bool UseWindowsHello { get; set; }
+    public string WindowsHelloKeyProtectedBase64 { get; set; } = string.Empty;
+
+    // v20: パスワード生成ルール
+    public bool GenUseUpper { get; set; } = true;
+    public bool GenUseDigits { get; set; } = true;
+    public bool GenUseSymbols { get; set; } = true;
+    public int GenLength { get; set; } = 10;
+
+    // v20: 更新期限ルール (0: 無期限, 90: 90日, 365: 1年)
+    public int MasterPasswordUpdateIntervalDays { get; set; }
 }
